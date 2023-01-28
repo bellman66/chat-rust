@@ -2,26 +2,12 @@ extern crate core;
 
 pub mod broadcast {
     use std::collections::HashMap;
-    use std::fs::read;
-    use std::io;
-    use std::io::BufReader;
+    use std::{io, thread};
+    use std::io::{BufReader, BufWriter};
     use std::net::{SocketAddr, TcpListener, TcpStream};
     use std::io::prelude::*;
-
-    pub struct ClientRequestInfo {
-        host: String,
-        connection : String,
-        upgrade: String,
-        origin: String,
-        websocket_key: [u8]
-    }
-
-    impl ClientRequestInfo {
-        pub fn create() {
-
-        }
-    }
-
+    use sha1::{Sha1, Digest};
+    use base64::{engine::{general_purpose}, Engine};
 
     pub struct ChatSocketServer {
         listener: TcpListener,
@@ -46,33 +32,8 @@ pub mod broadcast {
         pub fn listening(&mut self) {
             for stream in self.listener.incoming() {
                 match stream {
-                    Ok(mut stream) => {
-                        println!("Client Server in");
-
-                        // Set Field
-                        let mut headers = [httparse::EMPTY_HEADER; 64];
-                        let mut parser =  httparse::Request::new(&mut headers);
-
-                        // // 1. Http Parse
-                        // // ! WebSocket의 경우 http로 Connection 요청
-                        let mut stream_byte :[u8; 1000] = [0;1000];
-                        stream.read(&mut stream_byte).expect("Failed to Read Stream");
-
-                        // let readline = std::str::from_utf8(&stream_byte).expect("Failed to Convert Stream utf-8");
-                        // println!("{}", readline);
-
-                        parser.parse(&stream_byte);
-
-                        // 2. Connection 결과값 반환.
-                        let secret = match parser.headers.iter()
-                            .find(|val| val.name.eq("Sec-WebSocket-Key")) {
-                                Some(res) => res,
-                                None => panic!("Not Found Secret")
-                            };
-                        print!("{:?}", secret);
-
-                        // 3. Response
-                        ChatSocketServer::response_client(stream);
+                    Ok(stream) => {
+                        thread::spawn(move || Self::handle_connection(stream));
                     },
                     Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => break,
                     _ => panic!("Critical Stream Error")
@@ -80,13 +41,50 @@ pub mod broadcast {
             }
         }
 
-        fn response_client(mut stream: TcpStream) {
-            let response = "HTTP/1.1 101 Switching Protocols
-Upgrade: websocket
-Connection: Upgrade
-Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=";
-            stream.write(response.as_bytes()).unwrap();
-            stream.flush().unwrap();
+        fn handle_connection(stream: TcpStream) {
+            println!("Client Server in");
+
+            // Set Field
+            let mut headers = [httparse::EMPTY_HEADER; 64];
+            let mut request = httparse::Request::new(&mut headers);
+            let (mut reader, writer) = Self::get_tcp_stream_pair(stream).expect("Not Found Reader * writer");
+
+            // // 1. Http Parse - WebSocket의 경우 http로 Connection 요청
+            let mut stream_byte: [u8; 1000] = [0; 1000];
+            reader.read(&mut stream_byte).expect("Failed to Read Stream");
+            request.parse(&stream_byte).expect("Failed to Parsing");
+
+            // 2. Find Secret Key
+            let secret = match request.headers.iter()
+                .find(|val| val.name.eq("Sec-WebSocket-Key")) {
+                Some(res) => res,
+                None => panic!("Not Found Secret")
+            };
+
+            // 3. Make Sha-1
+            let return_key = make_sha1secret(secret.value);
+
+            // 4. Response
+            Self::response_client(writer, return_key);
+        }
+
+        fn get_tcp_stream_pair(s: TcpStream) -> io::Result<(BufReader<TcpStream>, BufWriter<TcpStream>)> {
+            let t = s.try_clone()?;
+            Ok((BufReader::new(s), BufWriter::new(t)))
+        }
+
+        fn response_client(mut writer: BufWriter<TcpStream>, return_secret: String) {
+            let mut response = String::from("HTTP/1.1 101 Switching Protocols\r\n\
+            Upgrade: websocket\r\n\
+            Connection: Upgrade\r\n\
+            Sec-WebSocket-Accept: ");
+            response.push_str(&return_secret);
+            response.push_str("\r\n");
+
+            println!("{}", response);
+
+            writer.write(response.as_bytes()).unwrap();
+            writer.flush().unwrap();
             println!("response OK")
         }
 
@@ -97,5 +95,21 @@ Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=";
             };
             self.clients.insert(id, client_stream);
         }
+    }
+
+    fn make_sha1secret(input_byte :&[u8]) -> String {
+        // create a Sha1 object
+        let mut hasher = Sha1::new();
+
+        // process input message
+        hasher.update(input_byte);
+        let hash_buf = hasher.finalize();
+
+        // encode
+        let mut result = String::new();
+        general_purpose::STANDARD.encode_string(hash_buf.as_slice(), &mut result);
+
+        // return Value
+        result
     }
 }

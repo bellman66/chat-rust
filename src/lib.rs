@@ -64,10 +64,12 @@ pub mod broadcast {
                         parser.parse(&stream_byte);
 
                         // 2. Connection 결과값 반환.
-                        for head in parser.headers.iter() {
-                            let val = std::str::from_utf8(head.value).unwrap();
-                            println!("{} / {}", head.name, val);
-                        }
+                        let secret = match parser.headers.iter()
+                            .find(|val| val.name.eq("Sec-WebSocket-Key")) {
+                                Some(res) => res,
+                                None => panic!("Not Found Secret")
+                            };
+                        print!("{:?}", secret);
 
                         // 3. Response
                         ChatSocketServer::response_client(stream);

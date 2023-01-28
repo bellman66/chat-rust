@@ -62,7 +62,9 @@ pub mod broadcast {
             };
 
             // 3. Make Sha-1
-            let return_key = make_sha1secret(secret.value);
+            let mut secret_str = String::from(std::str::from_utf8(secret.value).unwrap());
+            secret_str.push_str("258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
+            let return_key = make_sha1secret(secret_str.as_bytes());
 
             // 4. Response
             Self::response_client(writer, return_key);
@@ -74,14 +76,9 @@ pub mod broadcast {
         }
 
         fn response_client(mut writer: BufWriter<TcpStream>, return_secret: String) {
-            let mut response = String::from("HTTP/1.1 101 Switching Protocols\r\n\
-            Upgrade: websocket\r\n\
-            Connection: Upgrade\r\n\
-            Sec-WebSocket-Accept: ");
+            let mut response = String::from("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ");
             response.push_str(&return_secret);
-            response.push_str("\r\n");
-
-            println!("{}", response);
+            response.push_str("\r\n\r\n");
 
             writer.write(response.as_bytes()).unwrap();
             writer.flush().unwrap();

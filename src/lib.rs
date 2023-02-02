@@ -1,15 +1,17 @@
 extern crate core;
 
 pub mod broadcast {
+    type ClientMap = Arc<Mutex<HashMap<String, WebSocket<TcpStream>>>>;
+
     use std::collections::HashMap;
-    use std::{thread};
-    use std::borrow::{BorrowMut};
     use std::net::{SocketAddr, TcpListener, TcpStream};
+    use std::sync::{Arc, Mutex};
+    use std::thread;
     use tungstenite::{accept, Message, WebSocket};
 
-    pub struct ChatSocketServer <'a> {
+    pub struct ChatSocketServer {
         listener: TcpListener,
-        clients: HashMap<String, &'a WebSocket<TcpStream>>,
+        clients: ClientMap,
     }
 
     impl ChatSocketServer {
@@ -23,17 +25,18 @@ pub mod broadcast {
 
             ChatSocketServer {
                 listener: tcp_listener,
-                clients: HashMap::new(),
+                clients: Arc::new(Mutex::new(HashMap::new())),
             }
         }
 
-        pub fn listening(self) {
-            for stream in self.listener.incoming() {
+        pub fn listening(&mut self) {
+            let mut listener = &self.listener;
+            for stream in listener.incoming() {
                 match accept(stream.expect("Error to Stream")) {
                     Ok(mut stream) => {
                         println!("Client Server in");
 
-                        self.handle_connection(stream.borrow_mut());
+                        // self.handle_connection(stream);
                         thread::spawn(move || Self::read_chat(stream));
                     },
                     _ => panic!("Critical Stream Error")
@@ -41,8 +44,8 @@ pub mod broadcast {
             }
         }
 
-        fn handle_connection(mut self, stream: &'a mut WebSocket<TcpStream>) {
-            self.clients.insert(String::from("ok"), stream);
+        fn handle_connection (&mut self, stream: WebSocket<TcpStream>) {
+            self.clients.lock().unwrap().insert(String::from("ok"), stream);
         }
 
         fn read_chat(mut stream: WebSocket<TcpStream>) {
@@ -50,7 +53,14 @@ pub mod broadcast {
                 match stream.read_message() {
                     Ok(msg) => {
                         match msg {
-                            Message::Text(_) => { println!("{}", msg.to_string()); }
+                            Message::Text(_) => {
+                                let string = msg.to_string();
+                                let str = string.as_str();
+
+                                let mut return_msg = String::from("return : ");
+                                return_msg.push_str(str);
+                                stream.write_message(Message::text(return_msg));
+                            }
                             Message::Binary(_) => { println!("{}", msg.to_string()); }
                             Message::Ping(_) => {}
                             Message::Pong(_) => {}

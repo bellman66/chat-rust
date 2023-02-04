@@ -1,9 +1,10 @@
 extern crate core;
 
-pub mod broadcast {
+pub mod BroadCast {
     type ClientMap = Arc<Mutex<HashMap<String, WebSocket<TcpStream>>>>;
 
     use std::collections::HashMap;
+    use std::fs::read;
     use std::net::{SocketAddr, TcpListener, TcpStream};
     use std::sync::{Arc, Mutex};
     use std::thread;
@@ -18,34 +19,34 @@ pub mod broadcast {
         pub fn create (addr: SocketAddr) -> ChatSocketServer {
             println!("Hello New Chat Server!!!");
 
-            let tcp_listener = match TcpListener::bind(addr) {
-                Ok(res) => res,
-                _ => { panic!("Failed Bind TcpListener!")}
-            };
-
             ChatSocketServer {
-                listener: tcp_listener,
+                listener: match TcpListener::bind(addr) {
+                    Ok(res) => res,
+                    _ => { panic!("Failed Bind TcpListener!")}
+                },
                 clients: Arc::new(Mutex::new(HashMap::new())),
             }
         }
 
-        pub fn listening(&mut self) {
-            let mut listener = &self.listener;
-            for stream in listener.incoming() {
+        pub fn listening(mut self) {
+            for stream in self.listener.incoming() {
                 match accept(stream.expect("Error to Stream")) {
                     Ok(mut stream) => {
                         println!("Client Server in");
 
-                        // self.handle_connection(stream);
-                        thread::spawn(move || Self::read_chat(stream));
+                        thread::spawn(move || {
+                            let connection = self.handle_connection(stream).expect("Failed to Handle Conn");
+                            Self::read_chat(connection)
+                        });
                     },
                     _ => panic!("Critical Stream Error")
                 }
             }
         }
 
-        fn handle_connection (&mut self, stream: WebSocket<TcpStream>) {
-            self.clients.lock().unwrap().insert(String::from("ok"), stream);
+        fn handle_connection (&mut self, stream: WebSocket<TcpStream>) -> Option<WebSocket<TcpStream>> {
+            let arc = self.clients;
+            arc.lock().unwrap().insert(String::from("ok"), stream)
         }
 
         fn read_chat(mut stream: WebSocket<TcpStream>) {

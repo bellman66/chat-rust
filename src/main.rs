@@ -1,5 +1,5 @@
 use std::net::SocketAddr;
-use chat::broadcast::ChatSocketServer;
+use chat::BroadCast::ChatSocketServer;
 use std::str::FromStr;
 
 fn main() {

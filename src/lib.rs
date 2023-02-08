@@ -1,21 +1,23 @@
 extern crate core;
 
 pub mod BroadCast {
-    type ClientMap = Arc<Mutex<HashMap<String, WebSocket<TcpStream>>>>;
-    type ReceiveArc = Arc<Mutex<Receiver<WebSocket<TcpStream>>>>;
+    type ClientMap = Arc<Mutex<HashMap<String, RefCell<WebSocket<TcpStream>>>>>;
 
     use std::collections::HashMap;
     use std::net::{SocketAddr, TcpListener, TcpStream};
     use std::sync::{Arc, mpsc, Mutex};
     use std::{thread};
+    use std::borrow::{Borrow, BorrowMut};
+    use std::cell::RefCell;
     use std::fs::read;
+    use std::rc::Rc;
     use std::sync::mpsc::{Receiver, Sender};
     use tungstenite::{accept, Message, WebSocket};
 
     pub struct ClientStation {
         cnt: i32,
         sockets: ClientMap,
-        receiver: ReceiveArc
+        receiver: Receiver<WebSocket<TcpStream>>
     }
 
     impl ClientStation {
@@ -23,22 +25,25 @@ pub mod BroadCast {
             ClientStation {
                 cnt: 0,
                 sockets: Arc::new(Mutex::new(HashMap::new())),
-                receiver: Arc::new(Mutex::new(_receiver))
+                receiver: _receiver
             }
         }
 
         pub fn read_station(&mut self) {
-            let ref arc = self.receiver.lock().unwrap();
+            while let Ok(mut sock) = self.receiver.recv() {
+                let blockMap = &self.sockets.clone();
+                let mut mutexSocket = blockMap.lock().unwrap();
 
-            while let Ok(mut data) = arc.recv() {
-                thread::spawn(move || {
-                    let mut guard = &self.sockets.lock().unwrap();
-                    guard.insert(String::from("test"), data);
-
-                    let mut readSocket = guard.get_mut("test").unwrap();
-                    Self::read_chat(readSocket);
-                });
-            }
+                mutexSocket.insert(String::from("test"), RefCell::new(sock));
+                let websocket = match mutexSocket.get("test").borrow_mut() {
+                                            Some(sock) => {
+                                                thread::spawn(move || {
+                                                    Arc::new(sock.borrow_mut());
+                                                });
+                                            },
+                                            _ => panic!("failed")
+                                        };
+            };
         }
 
         fn read_chat(stream: &mut WebSocket<TcpStream>) {

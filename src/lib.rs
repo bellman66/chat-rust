@@ -8,7 +8,7 @@ pub mod BroadCast {
     use std::sync::{Arc, mpsc, Mutex};
     use std::{thread};
     use std::borrow::{Borrow, BorrowMut};
-    use std::cell::RefCell;
+    use std::cell::{RefCell, RefMut};
     use std::fs::read;
     use std::rc::Rc;
     use std::sync::mpsc::{Receiver, Sender};
@@ -31,22 +31,20 @@ pub mod BroadCast {
 
         pub fn read_station(&mut self) {
             while let Ok(mut sock) = self.receiver.recv() {
-                let blockMap = &self.sockets.clone();
-                let mut mutexSocket = blockMap.lock().unwrap();
+                let blockMap = self.sockets.clone();
 
-                mutexSocket.insert(String::from("test"), RefCell::new(sock));
-                let websocket = match mutexSocket.get("test").borrow_mut() {
-                                            Some(sock) => {
-                                                thread::spawn(move || {
-                                                    Arc::new(sock.borrow_mut());
-                                                });
-                                            },
-                                            _ => panic!("failed")
-                                        };
+                thread::spawn(move || {
+                    let mut mutexSocket = blockMap.lock().unwrap();
+                    mutexSocket.insert(String::from("test"), RefCell::new(sock));
+
+                    let option = mutexSocket.get("test").unwrap();
+                    let ref_mut = option.borrow_mut();
+                    Self::read_chat(ref_mut);
+                });
             };
         }
 
-        fn read_chat(stream: &mut WebSocket<TcpStream>) {
+        fn read_chat(mut stream: RefMut<WebSocket<TcpStream>>) {
             loop {
                 match stream.read_message() {
                     Ok(msg) => {

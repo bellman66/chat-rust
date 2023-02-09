@@ -1,7 +1,7 @@
 extern crate core;
 
 pub mod BroadCast {
-    type StreamMutex = Arc<Mutex<WebSocket<TcpStream>>>;
+    type StreamMutex = Arc<Mutex<Client>>;
     type ClientMap = Arc<Mutex<HashMap<String, StreamMutex>>>;
 
     use std::collections::HashMap;
@@ -13,53 +13,66 @@ pub mod BroadCast {
     use std::fs::read;
     use std::rc::Rc;
     use std::sync::mpsc::{Receiver, Sender};
-    use tungstenite::{accept, Message, WebSocket};
+    use tungstenite::{accept, client, Message, WebSocket};
+    use uuid::Uuid;
+
+    pub struct Client {
+        id: String,
+        socket: WebSocket<TcpStream>
+    }
 
     pub struct ClientStation {
         cnt: i32,
-        sockets: ClientMap,
-        receiver: Receiver<WebSocket<TcpStream>>
+        clients: ClientMap,
+        receiver: Receiver<Client>
     }
 
     impl ClientStation {
-        pub fn create(_receiver: Receiver<WebSocket<TcpStream>>) -> ClientStation {
+        pub fn create(_receiver: Receiver<Client>) -> ClientStation {
             ClientStation {
                 cnt: 0,
-                sockets: Arc::new(Mutex::new(HashMap::new())),
+                clients: Arc::new(Mutex::new(HashMap::new())),
                 receiver: _receiver
             }
         }
 
         pub fn read_station(&mut self) {
-            while let Ok(mut sock) = self.receiver.recv() {
-                let blockMap = self.sockets.clone();
+            while let Ok(mut clintInfo) = self.receiver.recv() {
+                let blockMap = self.clients.clone();
 
                 thread::spawn(move || {
+                    let id = clintInfo.id.clone();
+                    let id_str = id.clone();
+
                     let mut mutexSocket = blockMap.lock().unwrap();
-                    mutexSocket.insert(String::from("test"), Arc::new(Mutex::new(sock)));
+                    mutexSocket.insert(id, Arc::new(Mutex::new(clintInfo)));
 
-                    let stream_arc = mutexSocket.get("test").unwrap();
-
+                    let stream_arc = mutexSocket.get(&id_str).unwrap();
                     let socket_mutex = stream_arc.clone();
                     thread::spawn(move || {
-                        let stream_guard = socket_mutex.lock().unwrap();
-                        Self::read_chat(stream_guard);
+                        let mut client_guard = socket_mutex.lock().unwrap();
+                        Self::read_chat(client_guard);
                     });
                 });
             };
         }
 
-        fn read_chat(mut stream: MutexGuard<WebSocket<TcpStream>>) {
+        fn read_chat(mut client: MutexGuard<Client>) {
+            let client_id = client.id.clone();
+            let ref mut stream = client.socket;
             loop {
                 match stream.read_message() {
                     Ok(msg) => {
                         match msg {
                             Message::Text(_) => {
-                                let string = msg.to_string();
-                                let str = string.as_str();
+                                let msg_str = msg.to_string();
+                                let msg_str_ref = msg_str.as_str();
 
-                                let mut return_msg = String::from("return : ");
-                                return_msg.push_str(str);
+                                // Make msg
+                                let mut return_msg = String::from(&client_id);
+                                return_msg.push_str(" : ");
+                                return_msg.push_str(msg_str_ref);
+
                                 stream.write_message(Message::text(return_msg));
                             }
                             Message::Binary(_) => { println!("{}", msg.to_string()); }
@@ -77,11 +90,11 @@ pub mod BroadCast {
 
     pub struct ChatSocketServer {
         listener: TcpListener,
-        sender: Sender<WebSocket<TcpStream>>
+        sender: Sender<Client>
     }
 
     impl ChatSocketServer {
-        pub fn create (aAddr: SocketAddr, aSender: Sender<WebSocket<TcpStream>>) -> ChatSocketServer {
+        pub fn create (aAddr: SocketAddr, aSender: Sender<Client>) -> ChatSocketServer {
             println!("Hello New Chat Server!!!");
 
             ChatSocketServer {
@@ -99,8 +112,11 @@ pub mod BroadCast {
                     Ok(mut stream) => {
                         println!("Client Server in");
 
+                        // Make UUID
+                        let id_str = Uuid::new_v4().to_string();
+
                         // Process : Call Mpsc & Store Stream
-                        self.sender.send(stream).unwrap();
+                        self.sender.send(Client {id: id_str, socket: stream}).unwrap();
                     },
                     _ => panic!("Critical Stream Error")
                 }

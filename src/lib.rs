@@ -1,11 +1,12 @@
 extern crate core;
 
 pub mod BroadCast {
-    type ClientMap = Arc<Mutex<HashMap<String, RefCell<WebSocket<TcpStream>>>>>;
+    type StreamMutex = Arc<Mutex<WebSocket<TcpStream>>>;
+    type ClientMap = Arc<Mutex<HashMap<String, StreamMutex>>>;
 
     use std::collections::HashMap;
     use std::net::{SocketAddr, TcpListener, TcpStream};
-    use std::sync::{Arc, mpsc, Mutex};
+    use std::sync::{Arc, mpsc, Mutex, MutexGuard};
     use std::{thread};
     use std::borrow::{Borrow, BorrowMut};
     use std::cell::{RefCell, RefMut};
@@ -35,16 +36,20 @@ pub mod BroadCast {
 
                 thread::spawn(move || {
                     let mut mutexSocket = blockMap.lock().unwrap();
-                    mutexSocket.insert(String::from("test"), RefCell::new(sock));
+                    mutexSocket.insert(String::from("test"), Arc::new(Mutex::new(sock)));
 
-                    let option = mutexSocket.get("test").unwrap();
-                    let ref_mut = option.borrow_mut();
-                    Self::read_chat(ref_mut);
+                    let stream_arc = mutexSocket.get("test").unwrap();
+
+                    let socket_mutex = stream_arc.clone();
+                    thread::spawn(move || {
+                        let stream_guard = socket_mutex.lock().unwrap();
+                        Self::read_chat(stream_guard);
+                    });
                 });
             };
         }
 
-        fn read_chat(mut stream: RefMut<WebSocket<TcpStream>>) {
+        fn read_chat(mut stream: MutexGuard<WebSocket<TcpStream>>) {
             loop {
                 match stream.read_message() {
                     Ok(msg) => {

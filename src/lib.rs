@@ -38,16 +38,16 @@ pub mod BroadCast {
 
         pub fn read_station(&mut self) {
             while let Ok(mut clintInfo) = self.receiver.recv() {
-                let blockMap = self.clients.clone();
+                let stream_mutex = self.clients.clone();
 
                 thread::spawn(move || {
                     let id = clintInfo.id.clone();
                     let id_str = id.clone();
 
-                    let mut mutexSocket = blockMap.lock().unwrap();
-                    mutexSocket.insert(id, Arc::new(Mutex::new(clintInfo)));
+                    let mut clients_mutex = stream_mutex.lock().unwrap();
+                    clients_mutex.insert(id, Arc::new(Mutex::new(clintInfo)));
 
-                    let stream_arc = mutexSocket.get(&id_str).unwrap();
+                    let stream_arc = clients_mutex.get(&id_str).unwrap();
                     let socket_mutex = stream_arc.clone();
                     thread::spawn(move || {
                         let mut client_guard = socket_mutex.lock().unwrap();
@@ -66,13 +66,10 @@ pub mod BroadCast {
                         match msg {
                             Message::Text(_) => {
                                 let msg_str = msg.to_string();
-                                let msg_str_ref = msg_str.as_str();
+                                let input_msg = msg_str.as_str();
 
                                 // Make msg
-                                let mut return_msg = String::from(&client_id);
-                                return_msg.push_str(" : ");
-                                return_msg.push_str(msg_str_ref);
-
+                                let mut return_msg= Self::get_format_msg(&client_id, input_msg);
                                 stream.write_message(Message::text(return_msg));
                             }
                             Message::Binary(_) => { println!("{}", msg.to_string()); }
@@ -85,6 +82,13 @@ pub mod BroadCast {
                     Err(_) => {panic!("Failed to Read Msg")}
                 }
             }
+        }
+
+        fn get_format_msg(client_id: &str, input_msg: &str) -> String {
+            let mut return_msg = String::from(client_id);
+            return_msg.push_str(" : ");
+            return_msg.push_str(input_msg);
+            return_msg
         }
     }
 
